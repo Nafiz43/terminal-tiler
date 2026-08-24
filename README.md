@@ -17,23 +17,33 @@ Uses the main display’s visible area (menu bar and Dock are left free).
 
 - macOS with **Apple Terminal** (`Terminal.app`)
 - **Accessibility** permission for resizing windows:
-  - System Settings → Privacy & Security → Accessibility
-  - Enable **osascript** (and Terminal if prompted)
+  1. Open **System Settings → Privacy & Security → Accessibility**
+  2. Click **+** and add **`/usr/bin/osascript`** (enable the checkbox)
+  3. If macOS prompts again later, also allow **Terminal**
 
 Avoid macOS native fullscreen (green button / separate Space). The tiler works on normal desktop windows.
 
 ## Install (run at login)
 
 ```bash
-chmod +x ~/Desktop/terminal-tiler
-~/Desktop/terminal-tiler install
+git clone https://github.com/Nafiz43/terminal-tiler.git
+cd terminal-tiler
+chmod +x terminal-tiler
+./terminal-tiler install
+./terminal-tiler status
 ```
 
-This installs a LaunchAgent (`com.user.terminal-tiler`) that starts on login and keeps running in the background.
+That installs a LaunchAgent (`com.user.terminal-tiler`) that starts on login and keeps running in the background.
 
-If you already installed from `~/.local/bin/terminal-tiler`, that copy is what the agent uses until you reinstall from this Desktop path.
+**One-shot tile (no install):**
+
+```bash
+./terminal-tiler once
+```
 
 ## Commands
+
+Run these from the repo directory (or pass the full path to `terminal-tiler`):
 
 ```bash
 ./terminal-tiler              # watch in the foreground
@@ -45,6 +55,13 @@ If you already installed from `~/.local/bin/terminal-tiler`, that copy is what t
 ./terminal-tiler status       # agent + window count
 ./terminal-tiler help
 ```
+
+## Verify it works
+
+1. Run `./terminal-tiler status` — should say `LaunchAgent: running`.
+2. Open **Terminal → Shell → New Window** a few times.
+3. Windows should snap into equal tiles within about a second.
+4. If nothing moves, grant Accessibility (see Requirements) and run `./terminal-tiler once`.
 
 ## Logs
 
