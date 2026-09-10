@@ -53,6 +53,7 @@ Run these from the repo directory (or pass the full path to `terminal-tiler`):
 ./terminal-tiler stop         # stop the background agent
 ./terminal-tiler uninstall    # stop and remove the LaunchAgent
 ./terminal-tiler status       # agent + window count
+./terminal-tiler snapshot     # print current window geometry (debug)
 ./terminal-tiler help
 ```
 
@@ -78,5 +79,6 @@ Run these from the repo directory (or pass the full path to `terminal-tiler`):
 ## Notes
 
 - Only manages **Apple Terminal** windows (not iTerm, Ghostty, Cursor’s integrated terminal, etc.).
+- Windows are re-tiled whenever their geometry changes, not just when one opens or closes. Increasing the font size (`Ctrl` + `+`) grows an Apple Terminal window, since it sizes in character cells; the tiler snaps it back to its tile so only the text gets bigger. Manually resizing or dragging a window snaps back for the same reason.
 - Poll interval defaults to `0.6s`. Override with `TERMINAL_TILER_POLL` if needed.
 - This is a small local automation script, not an App Store product.

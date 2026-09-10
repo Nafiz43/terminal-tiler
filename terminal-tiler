@@ -121,21 +121,44 @@ end if
 EOF
 }
 
+# Geometry fingerprint: "id:x1,y1,x2,y2;" per window, sorted so focus changes
+# (which reorder Terminal's window list) don't look like a layout change.
+snapshot() {
+  /usr/bin/osascript <<'APPLESCRIPT' 2>/dev/null | tr ';' '\n' | sort | tr -d '\n'
+if application "Terminal" is running then
+	tell application "Terminal"
+		set AppleScript's text item delimiters to ","
+		set out to ""
+		repeat with w in every window
+			try
+				set out to out & (id of w as text) & ":" & ((bounds of w) as text) & ";"
+			end try
+		end repeat
+		set AppleScript's text item delimiters to ""
+		return out
+	end tell
+else
+	return ""
+end if
+APPLESCRIPT
+}
+
 watch_loop() {
   echo "[$(date '+%F %T')] terminal-tiler watching (poll=${POLL_SECONDS}s)" >>"$LOG_FILE"
-  local last=-1
+  local last=""
   while true; do
-    local n
-    n="$(count_windows)"
-    n="${n//[^0-9]/}"
-    n="${n:-0}"
-    if [[ "$n" != "$last" ]]; then
-      # Brief settle so the new window finishes opening / animating
+    local now
+    now="$(snapshot || true)"
+    if [[ "$now" != "$last" ]]; then
+      # Brief settle so a new/resized window finishes opening or animating
       sleep 0.25
       local tiled
       tiled="$(tile_once 2>>"$LOG_FILE" || true)"
-      echo "[$(date '+%F %T')] windows=${n} tiled=${tiled:-?}" >>"$LOG_FILE"
-      last="$n"
+      # Baseline against the bounds Terminal actually applied: it quantizes to
+      # character cells, so the result rarely equals what we asked for and
+      # comparing to the request would retile forever.
+      last="$(snapshot || true)"
+      echo "[$(date '+%F %T')] tiled=${tiled:-?}" >>"$LOG_FILE"
     fi
     sleep "$POLL_SECONDS"
   done
@@ -207,6 +230,7 @@ case "${1:-}" in
     echo "Stopped (plist kept at $PLIST — run uninstall to remove)"
     ;;
   status) cmd_status ;;
+  snapshot) snapshot; echo ;;
   ""|watch) watch_loop ;;
   -h|--help|help)
     sed -n '2,14p' "$SCRIPT"
