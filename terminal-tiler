@@ -264,6 +264,7 @@ music_history() {
 }
 
 music_ui() {
+  set +eu +o pipefail  # interactive loop: a failed command must never close the player
   export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
   printf '\033]0;music\007'
   local k state track
