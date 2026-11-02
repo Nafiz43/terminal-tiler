@@ -69,19 +69,21 @@ on tileTerminals()
 	tell application "Terminal"
 		if not running then return "0"
 		set wins to every window
-		set n to count of wins
+		-- Front-to-back order is unstable; sort by window id for stable placement.
+		-- Skip windows that vanish or are invisible mid-query (closed/ghost windows break the whole pass).
+		set idList to {}
+		repeat with w in wins
+			try
+				if visible of w then set end of idList to id of w
+			end try
+		end repeat
+		set n to count of idList
 		if n = 0 then return "0"
 
 		set {ox, oy, ow, oh} to my visibleFrame()
 		set {cols, rows} to my gridFor(n)
 		set cellW to ow / cols
 		set cellH to oh / rows
-
-		-- Front-to-back order is unstable; sort by window id for stable placement.
-		set idList to {}
-		repeat with w in wins
-			set end of idList to id of w
-		end repeat
 
 		-- Simple insertion sort (AppleScript has no built-in sort for lists of numbers)
 		set sortedIds to idList
@@ -101,11 +103,11 @@ on tileTerminals()
 			try
 				if custom title of selected tab of w is "music" then
 					set musicId to id of w
-					set rest to {}
+					set others to {}
 					repeat with i in sortedIds
-						if (contents of i) is not musicId then set end of rest to (contents of i)
+						if (contents of i) is not musicId then set end of others to (contents of i)
 					end repeat
-					set sortedIds to {musicId} & rest
+					set sortedIds to {musicId} & others
 					exit repeat
 				end if
 			end try
