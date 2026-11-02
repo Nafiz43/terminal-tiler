@@ -3,7 +3,7 @@
 //
 // Watches input with CGEventSource idle counters (no event tap), Chrome's active tab via AppleScript,
 // and pops a click-through glass card with an animated orb for: doom-scroll warnings (then closes the tab),
-// 20-20-20 eye breaks, low-activity nudges (quotes / personal advice / starters / deadlines), and greetings.
+// 20-20-20 eye breaks, low-activity nudges (AI news TLDRs / tech hard-work quotes / advice / starters), and greetings (deadline once a day).
 import Cocoa
 
 let home = FileManager.default.homeDirectoryForCurrentUser
@@ -13,6 +13,7 @@ var repo = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.ar
 // MARK: data
 
 struct Quote: Decodable { let q: String; let a: String }
+struct News: Decodable { let src: String; let title: String; let summary: String }
 struct Deadline: Decodable { let name: String; let subs: [String]; let deadline: String }
 struct Profile: Decodable {
     let name: String
@@ -195,7 +196,7 @@ final class Overlay {
 
 final class Coach {
     let ui = Overlay()
-    var profile: Profile, quotes: [Quote], deadlines: [Deadline]
+    var profile: Profile, quotes: [Quote], deadlines: [Deadline], news: [News], seenNews = Set<String>()
     var activeSecs = 0, wasAway = true, lastNudge = Date.distantPast, nudgeTurn = 0, tick = 0
     // scroll guard
     var feedTab: String?, feedStart = Date(), feedLastSeen = Date.distantPast, scrollTicks = 0, warnedAt: Date?, graceScroll = 0
@@ -206,6 +207,7 @@ final class Coach {
         profile = load("profile.json", Profile.self) ?? Profile(name: "there", advice: [], starters: [:], blocklist: ["youtube.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "reddit.com"], priorityConfs: [])
         quotes = load("quotes.json", [Quote].self) ?? []
         deadlines = load("deadlines.json", [Deadline].self) ?? []
+        news = load("news.json", [News].self) ?? []
         refreshIfStale()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.step() }
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -215,13 +217,14 @@ final class Coach {
     func refreshIfStale() {
         let f = cfg.appendingPathComponent("deadlines.json")
         let age = (try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Date().timeIntervalSince($0) } ?? .infinity
-        guard age > 86400 else { return }
+        guard age > 6 * 3600 else { return }  // news moves faster than deadlines
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = ["python3", repo.appendingPathComponent("coach/refresh.py").path]
         p.terminationHandler = { _ in DispatchQueue.main.async {
             self.quotes = load("quotes.json", [Quote].self) ?? self.quotes
             self.deadlines = load("deadlines.json", [Deadline].self) ?? self.deadlines
+            self.news = load("news.json", [News].self) ?? self.news
         } }
         try? p.run()
     }
@@ -251,7 +254,7 @@ final class Coach {
             wasAway = false
             let h = Calendar.current.component(.hour, from: now)
             let hi = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"
-            ui.say("\(hi), \(profile.name). " + (deadlineLine(deadlines, profile.priorityConfs).map { $0 + " " } ?? "") + "First move: " + starter(for: ctx, profile), seconds: 14)
+            ui.say("\(hi), \(profile.name). " + (deadlineOncePerDay().map { $0 + " " } ?? "") + "First move: " + starter(for: ctx, profile), seconds: 14)
             log("greet")
         }
         if activeSecs >= 1200 && !quiet {
@@ -270,12 +273,25 @@ final class Coach {
         if tick % 3600 == 0 { refreshIfStale() }
     }
 
+    /// Deadline countdown at most once per calendar day (survives restarts via a stamp file).
+    func deadlineOncePerDay() -> String? {
+        let stamp = cfg.appendingPathComponent("deadline_shown"), today = String(ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withFullDate]))
+        guard (try? String(contentsOf: stamp, encoding: .utf8)) != today, let d = deadlineLine(deadlines, profile.priorityConfs) else { return nil }
+        try? today.write(to: stamp, atomically: true, encoding: .utf8)
+        return d
+    }
+
+    // Rotation: news, quote, news, advice/starter.
     func nudge(_ ctx: String) -> String {
         switch nudgeTurn % 4 {
-        case 0: if let q = quotes.randomElement() { return "\u{201C}\(q.q)\u{201D} - \(q.a)" }
-        case 1: if let a = profile.advice.randomElement() { return a }
-        case 2: if let d = deadlineLine(deadlines, profile.priorityConfs) { return d + " Make today count." }
-        default: break
+        case 0, 2:
+            if let n = news.first(where: { !seenNews.contains($0.title) }) {
+                seenNews.insert(n.title)
+                return n.summary.isEmpty ? "\(n.src): \(n.title)" : "\(n.src): \(n.title). \(n.summary)"
+            }
+            if let q = quotes.randomElement() { return "\u{201C}\(q.q)\u{201D} - \(q.a)" }
+        case 1: if let q = quotes.randomElement() { return "\u{201C}\(q.q)\u{201D} - \(q.a)" }
+        default: if nudgeTurn % 8 == 3, let a = profile.advice.randomElement() { return a }
         }
         return "Quick start: " + starter(for: ctx, profile)
     }
@@ -329,5 +345,5 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 try? FileManager.default.createDirectory(at: cfg, withIntermediateDirectories: true)
 let coach = Coach()
-if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), Rafin here. CVPR is close: one focused block now beats three later.", seconds: 6) }
+if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), Rafin here. One focused block now beats three later.", seconds: 6) }
 app.run()

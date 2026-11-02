@@ -1,21 +1,50 @@
 #!/usr/bin/env python3
-"""Fetch AI conference deadlines (aideadlines.org) and hard-work quotes into ~/.config/terminal-tiler.
+"""Fetch AI conference deadlines (aideadlines.org), AI news (TLDR, OpenAI, Anthropic) and tech hard-work quotes
+into ~/.config/terminal-tiler.
 
 Run: python3 refresh.py        (the coach calls this once a day)
      python3 refresh.py --test (parser self-check, no network)
 """
 import datetime as dt
+import email.utils
+import html as htmllib
 import json
 import pathlib
 import re
 import sys
 import urllib.request
+import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 CFG = pathlib.Path.home() / ".config/terminal-tiler"
 DEADLINES_URL = "http://aideadlines.org/?sub=ML,CV,NLP,RO,SP,DM,AP,KR,HCI,IRSM,MISC"
 QUOTE_URLS = ["https://raw.githubusercontent.com/JamesFT/Database-Quotes-JSON/master/quotes.json",
               "https://zenquotes.io/api/quotes"]
+NEWS_FEEDS = [("TLDR AI", "https://tldr.tech/api/rss/ai"),
+              ("TLDR Tech", "https://tldr.tech/api/rss/tech"),
+              ("OpenAI", "https://openai.com/news/rss.xml"),
+              # Anthropic has no official feed; community scrape of anthropic.com/news
+              ("Anthropic", "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml")]
+# Builders, engineers, scientists: downloaded quotes are kept only from these authors.
+TECH_AUTHORS = re.compile(r"Edison|Jobs|Gates|Musk|Einstein|Tesla|Ford|Feynman|Turing|Hopper|Torvalds|Knuth|Bezos|"
+                          r"Graham|Hamming|Carmack|Wozniak|Drucker|Kay|Huang|Newton|Curie|Benjamin Franklin|Wright brothers|Orville Wright|Wilbur Wright", re.I)
+TECH_QUOTES = [
+    ("Talk is cheap. Show me the code.", "Linus Torvalds"),
+    ("Real artists ship.", "Steve Jobs"),
+    ("Stay hungry. Stay foolish.", "Steve Jobs"),
+    ("The best way to predict the future is to invent it.", "Alan Kay"),
+    ("Done is better than perfect.", "Facebook office poster"),
+    ("If you are not embarrassed by the first version of your product, you've launched too late.", "Reid Hoffman"),
+    ("Make something people want.", "Paul Graham"),
+    ("If you do not work on important problems, it's unlikely you'll do important work.", "Richard Hamming"),
+    ("Knowledge and productivity are like compound interest.", "Richard Hamming"),
+    ("I wish upon you ample doses of pain and suffering.", "Jensen Huang"),
+    ("We are stubborn on vision. We are flexible on details.", "Jeff Bezos"),
+    ("Focus is a matter of deciding what things you're not going to do.", "John Carmack"),
+    ("What I cannot create, I do not understand.", "Richard Feynman"),
+    ("The most dangerous phrase in the language is, 'We've always done it this way.'", "Grace Hopper"),
+    ("Genius is one percent inspiration and ninety-nine percent perspiration.", "Thomas Edison"),
+]
 HARD_WORK = re.compile(r"\b(hard work|work hard|working hard|discipline|persever|persist|effort|grind|diligen|"
                        r"practice|sacrific|consisten|focus|labou?r|toil|sweat|perspiration|determin|habit|"
                        r"don't stop|keep going|never give up|excellen)", re.I)
@@ -59,8 +88,33 @@ def parse_deadlines(html):
     return sorted(out, key=lambda d: d["deadline"])
 
 
+def fetch_news(days=14, per_feed=12):
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    out = []
+    for src, url in NEWS_FEEDS:
+        try:
+            items = ET.fromstring(get(url)).findall(".//item")
+        except Exception as e:
+            print(f"news: {src}: {e}", file=sys.stderr)
+            continue
+        for it in items[:per_feed]:
+            try:
+                when = email.utils.parsedate_to_datetime(it.findtext("pubDate"))
+            except Exception:
+                continue
+            if when < cutoff:
+                continue
+            summary = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", htmllib.unescape(it.findtext("description") or ""))).strip()
+            if len(summary) > 220:
+                summary = summary[:217].rsplit(" ", 1)[0] + "..."
+            out.append({"src": src, "title": (it.findtext("title") or "").strip(), "summary": summary,
+                        "date": when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    return sorted(out, key=lambda n: n["date"], reverse=True)  # newest first
+
+
 def fetch_quotes():
-    seen, out = set(), []
+    seen = {q.lower() for q, _ in TECH_QUOTES}
+    out = [{"q": q, "a": a} for q, a in TECH_QUOTES]
     for url in QUOTE_URLS:
         try:
             data = json.loads(get(url))
@@ -70,7 +124,7 @@ def fetch_quotes():
         for row in data:
             q = (row.get("quoteText") or row.get("q") or "").strip()
             a = (row.get("quoteAuthor") or row.get("a") or "Unknown").strip() or "Unknown"
-            if q and len(q) < 220 and HARD_WORK.search(q) and q.lower() not in seen:
+            if q and len(q) < 220 and HARD_WORK.search(q) and TECH_AUTHORS.search(a) and q.lower() not in seen:
                 seen.add(q.lower())
                 out.append({"q": q, "a": a})
     return out
@@ -86,9 +140,12 @@ def main():
     except Exception as e:
         print(f"deadlines: {e}", file=sys.stderr)
     quotes = fetch_quotes()
-    if quotes:  # keep the old cache if every source failed
-        (CFG / "quotes.json").write_text(json.dumps(quotes, indent=1, ensure_ascii=False))
-    print(f"quotes: {len(quotes)} hard-work quotes")
+    (CFG / "quotes.json").write_text(json.dumps(quotes, indent=1, ensure_ascii=False))
+    print(f"quotes: {len(quotes)} tech hard-work quotes")
+    news = fetch_news()
+    if news:  # keep the old cache if every feed failed
+        (CFG / "news.json").write_text(json.dumps(news, indent=1, ensure_ascii=False))
+    print(f"news: {len(news)} items")
 
 
 def test():
