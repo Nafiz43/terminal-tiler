@@ -97,7 +97,7 @@ terminal-tiler music history           # favourites from Chrome history -> ~/.co
 
 Edit `music/catalog.tsv` (show, count, YouTube search or URL, channel regex) to change the defaults.
 
-## Coach
+## Rafin (coach)
 
 `coach/Coach.swift` is a click-through glass card with an animated AI orb that slides in at the top-right:
 

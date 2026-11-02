@@ -111,7 +111,7 @@ final class Overlay {
     let win: NSWindow
     let card = NSVisualEffectView()
     let orb = OrbView(frame: NSRect(x: 0, y: 0, width: 64, height: 64))
-    let title = NSTextField(labelWithString: "COACH")
+    let title = NSTextField(labelWithString: "RAFIN")
     let body = NSTextField(wrappingLabelWithString: "")
     var queue: [(String, Double, Int?)] = [], busy = false, spin: Timer?
     let cardW: CGFloat = 440, pad: CGFloat = 16, textX: CGFloat = 84
@@ -329,5 +329,5 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 try? FileManager.default.createDirectory(at: cfg, withIntermediateDirectories: true)
 let coach = Coach()
-if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), your coach is on duty. CVPR is close: one focused block now beats three later.", seconds: 6) }
+if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), Rafin here. CVPR is close: one focused block now beats three later.", seconds: 6) }
 app.run()
