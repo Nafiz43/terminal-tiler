@@ -2,7 +2,7 @@
 // Build: swiftc -O Coach.swift -o tt-coach     Run: ./tt-coach <repo-dir>    Self-check: ./tt-coach --test
 //
 // Watches input with CGEventSource idle counters (no event tap), Chrome's active tab via AppleScript,
-// and pops a click-through glass card with an animated orb for: doom-scroll warnings (then closes the tab),
+// and pops a click-through glass card with a breathing AI sparkle for: doom-scroll warnings (then closes the tab),
 // 20-20-20 eye breaks, low-activity nudges (AI news TLDRs / tech hard-work quotes / advice / starters), and greetings (deadline once a day).
 import Cocoa
 
@@ -77,34 +77,32 @@ func starter(for context: String, _ p: Profile) -> String {
 
 // MARK: AI orb overlay
 
-/// Glowing orb: three colour blobs swirl inside a glass sphere (assistant-style, not a cartoon).
-final class OrbView: NSView {
-    var phase: CGFloat = 0
-    let blobs: [(NSColor, CGFloat, CGFloat)] = [   // colour, orbit speed, orbit radius (fraction)
-        (NSColor(srgbRed: 0.49, green: 0.23, blue: 0.93, alpha: 1), 1.0, 0.28),
-        (NSColor(srgbRed: 0.13, green: 0.83, blue: 0.93, alpha: 1), -1.4, 0.30),
-        (NSColor(srgbRed: 0.93, green: 0.28, blue: 0.60, alpha: 1), 0.7, 0.24)]
-    override func draw(_ r: NSRect) {
-        let c = NSPoint(x: bounds.midX, y: bounds.midY), rad = bounds.width / 2 - 6
-        let pulse = 1 + 0.06 * sin(phase * 1.3)
-        // outer glow
-        NSGradient(colors: [NSColor(srgbRed: 0.45, green: 0.4, blue: 1, alpha: 0.45), .clear])!
-            .draw(fromCenter: c, radius: 0, toCenter: c, radius: rad * 1.25 * pulse, options: [])
-        let sphere = NSBezierPath(ovalIn: NSRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2))
-        NSGraphicsContext.saveGraphicsState(); sphere.addClip()
-        NSColor(srgbRed: 0.06, green: 0.05, blue: 0.16, alpha: 1).setFill(); sphere.fill()
-        for (i, (col, speed, orbit)) in blobs.enumerated() {
-            let a = phase * speed + CGFloat(i) * 2.1
-            let bc = NSPoint(x: c.x + cos(a) * rad * orbit * 2, y: c.y + sin(a) * rad * orbit * 2)
-            NSGradient(colors: [col.withAlphaComponent(0.95), col.withAlphaComponent(0)])!
-                .draw(fromCenter: bc, radius: 0, toCenter: bc, radius: rad * 1.05, options: [])
+/// Star that breathes (lights up, then dims, ~4 s) via Core Animation: no redraw timer.
+final class OrbView: NSImageView {
+    static let tint = NSColor(srgbRed: 0.80, green: 0.78, blue: 1.0, alpha: 1)   // light lavender
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Rafin")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 32, weight: .regular)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [Self.tint])))
+        imageScaling = .scaleNone
+        wantsLayer = true
+        layer?.masksToBounds = false
+        layer?.shadowColor = NSColor.white.cgColor
+        layer?.shadowOffset = .zero
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func breathe() {
+        guard let l = layer else { return }
+        l.removeAllAnimations()
+        for (key, from, to) in [("opacity", 0.12, 1.0), ("shadowOpacity", 0.0, 1.0), ("shadowRadius", 0.0, 18.0)] as [(String, Double, Double)] {
+            let an = CABasicAnimation(keyPath: key)
+            an.fromValue = from; an.toValue = to
+            an.duration = 2.1; an.autoreverses = true; an.repeatCount = .infinity
+            an.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            l.add(an, forKey: key)
         }
-        // specular highlight
-        let hc = NSPoint(x: c.x - rad * 0.35, y: c.y + rad * 0.4)
-        NSGradient(colors: [NSColor.white.withAlphaComponent(0.55), .clear])!
-            .draw(fromCenter: hc, radius: 0, toCenter: hc, radius: rad * 0.55, options: [])
-        NSGraphicsContext.restoreGraphicsState()
-        NSColor.white.withAlphaComponent(0.25).setStroke(); sphere.lineWidth = 1; sphere.stroke()
     }
 }
 
@@ -114,7 +112,7 @@ final class Overlay {
     let orb = OrbView(frame: NSRect(x: 0, y: 0, width: 64, height: 64))
     let title = NSTextField(labelWithString: "RAFIN")
     let body = NSTextField(wrappingLabelWithString: "")
-    var queue: [(String, Double, Int?)] = [], busy = false, spin: Timer?
+    var queue: [(String, Double, Int?)] = [], busy = false
     let cardW: CGFloat = 440, pad: CGFloat = 16, textX: CGFloat = 84
 
     init() {
@@ -167,15 +165,12 @@ final class Overlay {
     }
 
     private func next() {
-        guard !queue.isEmpty else { busy = false; win.orderOut(nil); spin?.invalidate(); return }
+        guard !queue.isEmpty else { busy = false; win.orderOut(nil); orb.layer?.removeAllAnimations(); return }
         busy = true
         let (text, secs, countdown) = queue.removeFirst()
         layout(countdown.map { "\(text)  \($0)s" } ?? text)
         win.orderFrontRegardless()
-        spin?.invalidate()
-        spin = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
-            self?.orb.phase += 0.05; self?.orb.needsDisplay = true
-        }
+        orb.breathe()
         slide(in: true) { [self] in
             var left = countdown ?? 0
             if countdown != nil {
