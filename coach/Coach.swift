@@ -13,7 +13,7 @@ var repo = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.ar
 // MARK: data
 
 struct Quote: Decodable { let q: String; let a: String }
-struct News: Decodable { let src: String; let title: String; let summary: String }
+struct News: Decodable { let src: String; let title: String; let summary: String; let tldr: String? }
 struct Deadline: Decodable { let name: String; let subs: [String]; let deadline: String }
 struct Profile: Decodable {
     let name: String
@@ -77,7 +77,49 @@ func starter(for context: String, _ p: Profile) -> String {
 
 // MARK: AI orb overlay
 
-/// Star that breathes (lights up, then dims, ~4 s) via Core Animation: no redraw timer.
+/// Split an icon sheet (dark glyphs on a light background, laid out in a grid) into template images.
+/// Rows/columns are found from gaps in the dark-pixel projection, so any grid size works.
+func sliceIconSheet(_ url: URL) -> [NSImage] {
+    guard let src = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [] }
+    let w = src.width, h = src.height
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(src, in: CGRect(x: 0, y: 0, width: w, height: h))
+    var ink = [UInt8](repeating: 0, count: w * h)  // 0 = background, 255 = glyph
+    for i in 0..<(w * h) {
+        let lum = (Int(px[i * 4]) * 3 + Int(px[i * 4 + 1]) * 6 + Int(px[i * 4 + 2])) / 10
+        ink[i] = UInt8(min(255, max(0, (200 - lum) * 255 / 150)))
+    }
+    func runs(_ n: Int, _ hasInk: (Int) -> Bool) -> [Range<Int>] {
+        var out: [Range<Int>] = [], start: Int?, lastInk = -100
+        for i in 0..<n where hasInk(i) {
+            if let s = start, i - lastInk > 12 { out.append(s..<(lastInk + 1)); start = i } else if start == nil { start = i }
+            lastInk = i
+        }
+        if let s = start { out.append(s..<(lastInk + 1)) }
+        return out.filter { $0.count > 20 }
+    }
+    let cols = runs(w) { x in (0..<h).contains { ink[$0 * w + x] > 128 } }
+    let rows = runs(h) { y in (0..<w).contains { ink[y * w + $0] > 128 } }
+    var icons: [NSImage] = []
+    for r in rows { for c in cols {
+        var out = [UInt8](repeating: 0, count: c.count * r.count * 4)
+        for y in 0..<r.count { for x in 0..<c.count {
+            let a = ink[(r.lowerBound + y) * w + c.lowerBound + x], o = (y * c.count + x) * 4
+            out[o] = a; out[o + 1] = a; out[o + 2] = a; out[o + 3] = a   // white, premultiplied
+        } }
+        guard out.contains(where: { $0 > 128 }) else { continue }
+        let cg = CGContext(data: &out, width: c.count, height: r.count, bitsPerComponent: 8, bytesPerRow: c.count * 4,
+                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+        let img = NSImage(cgImage: cg, size: NSSize(width: 40, height: 40 * CGFloat(r.count) / CGFloat(c.count)))
+        img.isTemplate = true
+        icons.append(img)
+    } }
+    return icons
+}
+
+/// Icon that breathes (lights up, then dims, ~4 s) via Core Animation: no redraw timer.
 final class OrbView: NSImageView {
     static let tint = NSColor(srgbRed: 0.80, green: 0.78, blue: 1.0, alpha: 1)   // light lavender
     override init(frame: NSRect) {
@@ -85,13 +127,20 @@ final class OrbView: NSImageView {
         image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Rafin")?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 32, weight: .regular)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [Self.tint])))
-        imageScaling = .scaleNone
+        imageScaling = .scaleProportionallyUpOrDown
+        contentTintColor = Self.tint
         wantsLayer = true
         layer?.masksToBounds = false
         layer?.shadowColor = NSColor.white.cgColor
         layer?.shadowOffset = .zero
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Pool from ~/.config/terminal-tiler/icons.png (any grid of glyphs); the star is the fallback.
+    lazy var pool: [NSImage] = sliceIconSheet(cfg.appendingPathComponent("icons.png"))
+    func shuffleIcon() {
+        if let i = pool.randomElement() { image = i; frame.size = NSSize(width: 64, height: 64) }
+    }
 
     func breathe() {
         guard let l = layer else { return }
@@ -170,7 +219,7 @@ final class Overlay {
         let (text, secs, countdown) = queue.removeFirst()
         layout(countdown.map { "\(text)  \($0)s" } ?? text)
         win.orderFrontRegardless()
-        orb.breathe()
+        orb.shuffleIcon(); orb.breathe()
         slide(in: true) { [self] in
             var left = countdown ?? 0
             if countdown != nil {
@@ -282,6 +331,7 @@ final class Coach {
         case 0, 2:
             if let n = news.first(where: { !seenNews.contains($0.title) }) {
                 seenNews.insert(n.title)
+                if let t = n.tldr, !t.isEmpty { return "\(n.src) TLDR\n" + t.replacingOccurrences(of: "  \n", with: "\n") }
                 return n.summary.isEmpty ? "\(n.src): \(n.title)" : "\(n.src): \(n.title). \(n.summary)"
             }
             if let q = quotes.randomElement() { return "\u{201C}\(q.q)\u{201D} - \(q.a)" }
@@ -340,5 +390,9 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 try? FileManager.default.createDirectory(at: cfg, withIntermediateDirectories: true)
 let coach = Coach()
-if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), Rafin here. One focused block now beats three later.", seconds: 6) }
+if CommandLine.arguments.contains("--icons") { print("icons:", sliceIconSheet(cfg.appendingPathComponent("icons.png")).count); exit(0) }
+if CommandLine.arguments.contains("--demo") {
+    coach.ui.say("Hi \(coach.profile.name), Rafin here. One focused block now beats three later.", seconds: 5)
+    coach.ui.say(coach.nudge(""), seconds: 7)   // first nudge = latest news TLDR
+}
 app.run()

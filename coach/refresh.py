@@ -9,6 +9,7 @@ import datetime as dt
 import email.utils
 import html as htmllib
 import json
+import os
 import pathlib
 import re
 import sys
@@ -45,6 +46,14 @@ TECH_QUOTES = [
     ("The most dangerous phrase in the language is, 'We've always done it this way.'", "Grace Hopper"),
     ("Genius is one percent inspiration and ninety-nine percent perspiration.", "Thomas Edison"),
 ]
+OLLAMA = os.environ.get("RAFIN_OLLAMA", "http://localhost:11434")
+MODEL = os.environ.get("RAFIN_MODEL", "qwen3:8b")
+PROMPTS = {
+    "newsletter": "Below is today's TLDR newsletter. Write a TLDR of the 3 most important AI/tech stories, "
+                  "one line each, max 14 words per line, start each line with '- '. Skip sponsors. No intro.",
+    "article": "Write a TLDR of this announcement in at most 2 sentences and 40 words total. "
+               "Say what was released or done and why it matters for an AI researcher. No intro, no hype.",
+}
 HARD_WORK = re.compile(r"\b(hard work|work hard|working hard|discipline|persever|persist|effort|grind|diligen|"
                        r"practice|sacrific|consisten|focus|labou?r|toil|sweat|perspiration|determin|habit|"
                        r"don't stop|keep going|never give up|excellen)", re.I)
@@ -88,6 +97,41 @@ def parse_deadlines(html):
     return sorted(out, key=lambda d: d["deadline"])
 
 
+def page_text(url, limit=7000):
+    h = get(url)
+    h = re.sub(r"(?is)<(script|style|noscript|svg|head|nav|footer)[^>]*>.*?</\1>", " ", h)
+    return re.sub(r"\s+", " ", htmllib.unescape(re.sub(r"<[^>]+>", " ", h))).strip()[:limit]
+
+
+def ollama_tldr(kind, title, text):
+    body = json.dumps({"model": MODEL, "stream": False, "think": False, "options": {"temperature": 0.2, "num_predict": 160},
+                       "prompt": f"{PROMPTS[kind]}\n\nTitle: {title}\n\n{text}"}).encode()
+    req = urllib.request.Request(OLLAMA + "/api/generate", data=body, headers={"Content-Type": "application/json"})
+    out = json.loads(urllib.request.urlopen(req, timeout=300).read())["response"]
+    return re.sub(r"(?s)<think>.*?</think>", "", out).strip()
+
+
+def add_tldrs(news, old):
+    """Summarise each item once with the local model; cached by link so a refresh only summarises new items."""
+    cache = {n.get("link"): n.get("tldr") for n in old if n.get("tldr")}
+    for n in news:
+        if n["link"] in cache:
+            n["tldr"] = cache[n["link"]]
+            continue
+        kind = "newsletter" if n["src"].startswith("TLDR") else "article"
+        try:
+            text = page_text(n["link"])
+        except Exception:
+            text = n["summary"]  # openai.com blocks scripted fetches (403): use the feed summary
+        try:
+            n["tldr"] = ollama_tldr(kind, n["title"], text or n["title"])
+        except Exception as e:
+            print(f"tldr: {MODEL} unavailable ({e}); keeping feed summaries", file=sys.stderr)
+            return news
+        print(f"tldr: {n['src']}: {n['title'][:60]}")
+    return news
+
+
 def fetch_news(days=14, per_feed=12):
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
     out = []
@@ -108,6 +152,7 @@ def fetch_news(days=14, per_feed=12):
             if len(summary) > 220:
                 summary = summary[:217].rsplit(" ", 1)[0] + "..."
             out.append({"src": src, "title": (it.findtext("title") or "").strip(), "summary": summary,
+                        "link": (it.findtext("link") or "").strip(),
                         "date": when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
     return sorted(out, key=lambda n: n["date"], reverse=True)  # newest first
 
@@ -143,6 +188,11 @@ def main():
     (CFG / "quotes.json").write_text(json.dumps(quotes, indent=1, ensure_ascii=False))
     print(f"quotes: {len(quotes)} tech hard-work quotes")
     news = fetch_news()
+    try:
+        old = json.loads((CFG / "news.json").read_text())
+    except Exception:
+        old = []
+    news = add_tldrs(news, old)
     if news:  # keep the old cache if every feed failed
         (CFG / "news.json").write_text(json.dumps(news, indent=1, ensure_ascii=False))
     print(f"news: {len(news)} items")

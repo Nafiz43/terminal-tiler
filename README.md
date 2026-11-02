@@ -103,7 +103,7 @@ Edit `music/catalog.tsv` (show, count, YouTube search or URL, channel regex) to 
 
 - **Scroll guard:** 3 min of scrolling on a blocklisted Chrome site gets a warning; still scrolling 60 s later and the tab is closed (Cmd+Shift+T restores it).
 - **Eye breaks:** 20-20-20 every 20 min of active input.
-- **Low-activity nudges:** after 5 min without typing, rotates AI news TLDRs (TLDR AI/Tech, OpenAI, Anthropic), tech hard-work quotes, personal advice and a starter for the focused window.
+- **Low-activity nudges:** after 5 min without typing, rotates AI news TLDRs (TLDR AI/Tech, OpenAI, Anthropic; summarised locally by Ollama, `RAFIN_MODEL`, default `qwen3:8b`), tech hard-work quotes, personal advice and a starter for the focused window.
 - **Deadlines:** the next aideadlines.org deadline appears once a day, in the first greeting.
 - **Greeting:** on login and after 30+ min away.
 
@@ -113,6 +113,8 @@ It stays quiet in Zoom/FaceTime/Teams/Webex/Keynote.
 terminal-tiler coach install    # build + LaunchAgent (grant Accessibility; allow Chrome automation)
 terminal-tiler coach demo | refresh | report | uninstall
 ```
+
+Icons: drop any grid of dark glyphs on a light background at `~/.config/terminal-tiler/icons.png`; Rafin slices it and shows a random one per message (falls back to a star).
 
 Personal settings live in `~/.config/terminal-tiler/profile.json` (see `coach/profile.example.json`): name, advice, window-keyword starters, blocklist, priority conferences.
 The repo must not live under `~/Desktop`, `~/Documents` or `~/Downloads`, because launchd agents cannot read those folders.
