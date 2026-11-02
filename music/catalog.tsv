@@ -1,0 +1,10 @@
+# show<TAB>count<TAB>youtube search query or URL<TAB>channel regex (yt-dlp match-filter)
+# Personal picks (from `terminal-tiler music history`) go in ~/.config/terminal-tiler/catalog.tsv and are read first.
+Bhoot FM	10	Bhoot FM Radio Foorti full episode	Storyline98|Radio Foorti
+Sunday Suspense	5	Sunday Suspense Feluda Satyajit Ray	Mirchi Bangla
+Sunday Suspense	4	Sunday Suspense Byomkesh Bakshi	Mirchi Bangla
+Sunday Suspense	3	Sunday Suspense Tarini Khuro	Mirchi Bangla
+Tech Podcast	4	Latent Space podcast	Latent Space
+Tech Podcast	4	Dwarkesh Patel podcast AI	Dwarkesh
+Tech Podcast	3	TWIML AI podcast	TWIML
+Tech Podcast	2	Lex Fridman AI research podcast	Lex Fridman

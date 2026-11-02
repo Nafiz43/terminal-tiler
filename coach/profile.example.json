@@ -1,0 +1,7 @@
+{
+ "name": "there",
+ "advice": ["Pick the one task that moves your main goal. Do it before email."],
+ "starters": {"default": ["Pick one task, set a 50-minute block, do the smallest first step."]},
+ "blocklist": ["youtube.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "reddit.com", "tiktok.com", "linkedin.com/feed", "news.google.com"],
+ "priorityConfs": ["CVPR", "NeurIPS", "ICLR", "ICML", "ACL"]
+}

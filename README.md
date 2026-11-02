@@ -82,3 +82,36 @@ Run these from the repo directory (or pass the full path to `terminal-tiler`):
 - Windows are re-tiled whenever their geometry changes, not just when one opens or closes. Increasing the font size (`Ctrl` + `+`) grows an Apple Terminal window, since it sizes in character cells; the tiler snaps it back to its tile so only the text gets bigger. Manually resizing or dragging a window snaps back for the same reason.
 - Poll interval defaults to `0.6s`. Override with `TERMINAL_TILER_POLL` if needed.
 - This is a small local automation script, not an App Store product.
+
+## Music terminal
+
+The first Terminal window of a session opens a second window titled `music`, pinned to the top-left cell.
+Keys: `1` Bhoot FM, `2` Sunday Suspense, `3` Tech Podcast, `n`/`b` next/back, `p` play/pause, `s` shuffle, `u` sync, `q` quit.
+Audio is downloaded once with `yt-dlp` into `~/Music/TerminalTiler/` and played from Music.app playlists named `TT <show>`.
+
+```bash
+brew install yt-dlp ffmpeg
+terminal-tiler music sync              # all shows; or: terminal-tiler music sync "Bhoot FM" 3
+terminal-tiler music history           # favourites from Chrome history -> ~/.config/terminal-tiler/catalog.tsv
+```
+
+Edit `music/catalog.tsv` (show, count, YouTube search or URL, channel regex) to change the defaults.
+
+## Pac-Man coach
+
+`coach/Coach.swift` is a click-through overlay where Pac-Man glides in with a speech bubble:
+
+- **Scroll guard:** 3 min of scrolling on a blocklisted Chrome site gets a warning; still scrolling 60 s later and the tab is closed (Cmd+Shift+T restores it).
+- **Eye breaks:** 20-20-20 every 20 min of active input.
+- **Low-activity nudges:** after 5 min without typing, rotates hard-work quotes, personal advice, a starter for the focused window, and the next deadline from aideadlines.org.
+- **Greeting:** on login and after 30+ min away.
+
+It stays quiet in Zoom/FaceTime/Teams/Webex/Keynote.
+
+```bash
+terminal-tiler coach install    # build + LaunchAgent (grant Accessibility; allow Chrome automation)
+terminal-tiler coach demo | refresh | report | uninstall
+```
+
+Personal settings live in `~/.config/terminal-tiler/profile.json` (see `coach/profile.example.json`): name, advice, window-keyword starters, blocklist, priority conferences.
+The repo must not live under `~/Desktop`, `~/Documents` or `~/Downloads`, because launchd agents cannot read those folders.

@@ -7,6 +7,10 @@
 #   terminal-tiler install      # install LaunchAgent (starts at login)
 #   terminal-tiler uninstall    # remove LaunchAgent
 #   terminal-tiler start|stop|status
+#   terminal-tiler music            # music player (auto-opens top-left with the first Terminal window)
+#   terminal-tiler music sync [SHOW [N]]  # download catalog audio into Music.app playlists
+#   terminal-tiler music history    # pick episodes from your Chrome history (needs Full Disk Access)
+#   terminal-tiler coach install|uninstall|demo|refresh|report   # Pac-Man productivity coach
 #
 # Requires: System Settings → Privacy & Security → Accessibility → allow Terminal
 #           (or allow `osascript` / this script's parent if run from launchd)
@@ -15,7 +19,14 @@ set -euo pipefail
 
 LABEL="com.user.terminal-tiler"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+SCRIPT="$(readlink -f "$0")"
+REPO="$(dirname "$SCRIPT")"
+CFG="$HOME/.config/terminal-tiler"
+MUSIC_DIR="$HOME/Music/TerminalTiler"
+SHOWS=("Bhoot FM" "Sunday Suspense" "Tech Podcast")
+COACH_LABEL="${LABEL}.coach"
+COACH_PLIST="$HOME/Library/LaunchAgents/${COACH_LABEL}.plist"
+COACH_BIN="$REPO/coach/tt-coach"
 POLL_SECONDS="${TERMINAL_TILER_POLL:-0.6}"
 LOG_FILE="${TERMINAL_TILER_LOG:-$HOME/Library/Logs/terminal-tiler.log}"
 
@@ -85,6 +96,21 @@ on tileTerminals()
 			set item (j + 1) of sortedIds to keyVal
 		end repeat
 
+		-- The window titled "music" always takes the first (top-left) cell.
+		repeat with w in wins
+			try
+				if custom title of selected tab of w is "music" then
+					set musicId to id of w
+					set rest to {}
+					repeat with i in sortedIds
+						if (contents of i) is not musicId then set end of rest to (contents of i)
+					end repeat
+					set sortedIds to {musicId} & rest
+					exit repeat
+				end if
+			end try
+		end repeat
+
 		set idx to 0
 		repeat with wid in sortedIds
 			set col to idx mod cols
@@ -143,12 +169,31 @@ end if
 APPLESCRIPT
 }
 
+has_music_window() {
+  [[ "$(/usr/bin/osascript -e 'tell application "Terminal" to count (windows whose custom title of selected tab is "music")' 2>/dev/null)" =~ ^[1-9] ]]
+}
+
+spawn_music() {
+  /usr/bin/osascript >/dev/null <<EOF
+tell application "Terminal"
+	set t to do script "exec /bin/bash '$SCRIPT' music"
+	set custom title of t to "music"
+end tell
+EOF
+}
+
 watch_loop() {
   echo "[$(date '+%F %T')] terminal-tiler watching (poll=${POLL_SECONDS}s)" >>"$LOG_FILE"
-  local last=""
+  local last="" had=0
   while true; do
     local now
     now="$(snapshot || true)"
+    # First Terminal window of a session = starting work: open the music window (once per session).
+    if [[ -n "$now" && $had == 0 ]]; then
+      has_music_window || spawn_music
+      now="$(snapshot || true)"
+    fi
+    [[ -n "$now" ]] && had=1 || had=0
     if [[ "$now" != "$last" ]]; then
       # Brief settle so a new/resized window finishes opening or animating
       sleep 0.25
@@ -163,6 +208,118 @@ watch_loop() {
     sleep "$POLL_SECONDS"
   done
 }
+
+# ---------- music ----------
+catalog() { cat "$CFG/catalog.tsv" "$REPO/music/catalog.tsv" 2>/dev/null | grep -v '^#' | grep -v '^$'; }
+
+music_osa() { /usr/bin/osascript -e "tell application \"Music\" to $1" 2>/dev/null || true; }
+
+# music_sync SHOW [max-new]: download that show's catalog audio, import new files into playlist "TT SHOW".
+music_sync() {
+  local show="$1" max="${2:-}" dir="$MUSIC_DIR/$1"
+  mkdir -p "$dir" "$CFG"
+  while IFS=$'\t' read -r s n q ch; do
+    [[ "$s" == "$show" ]] || continue
+    [[ "$q" == http* ]] || q="ytsearch${n}:$q"
+    yt-dlp -q --no-warnings --progress -f 'bestaudio[ext=m4a]/bestaudio' -x --audio-format m4a \
+      --download-archive "$MUSIC_DIR/archive.txt" --match-filter "channel~='(?i)${ch:-.}' & duration>900" \
+      ${max:+--max-downloads "$max"} -o "$dir/%(title).120s [%(id)s].%(ext)s" "$q" </dev/null || true
+    [[ -n "$max" ]] && compgen -G "$dir/*.m4a" >/dev/null && break
+  done < <(catalog)
+  /usr/bin/osascript -e "tell application \"Music\" to if not (exists user playlist \"TT $show\") then make new user playlist with properties {name:\"TT $show\"}" >/dev/null
+  local f
+  for f in "$dir"/*.m4a; do
+    [[ -e "$f" ]] || continue
+    grep -qxF "$f" "$MUSIC_DIR/imported.txt" 2>/dev/null && continue
+    /usr/bin/osascript -e "tell application \"Music\" to add (POSIX file \"$f\") to user playlist \"TT $show\"" >/dev/null && echo "$f" >>"$MUSIC_DIR/imported.txt"
+  done
+}
+
+music_play() {
+  local show="$1"
+  if ! compgen -G "$MUSIC_DIR/$show/*.m4a" >/dev/null; then
+    echo "First run for $show: fetching one episode, the rest download in the background..."
+    music_sync "$show" 1
+    (music_sync "$show" >/dev/null 2>&1 &)
+  fi
+  music_osa "play user playlist \"TT $show\"" >/dev/null || echo "Could not start playback (Music.app automation permission?)"
+}
+
+music_history() {
+  local db="$HOME/Library/Application Support/Google/Chrome/Default/History" tmp
+  tmp="$(mktemp)"; cp "$db" "$tmp" 2>/dev/null || { echo "Cannot read Chrome history: grant Full Disk Access to Terminal and retry."; return 1; }
+  mkdir -p "$CFG"
+  { echo "# from Chrome history $(date +%F)"
+    sqlite3 -separator $'\t' "$tmp" "
+      select 'Bhoot FM', 1, url, '.' from urls where url like '%youtube.com/watch%' and lower(title) like '%bhoot fm%'
+        order by visit_count desc, last_visit_time desc limit 15;
+      select 'Sunday Suspense', 1, url, '.' from urls where url like '%youtube.com/watch%' and lower(title) like '%sunday suspense%'
+        order by visit_count desc, last_visit_time desc limit 15;
+      select 'Tech Podcast', 1, url, '.' from urls where url like '%youtube.com/watch%' and lower(title) like '%podcast%'
+        and lower(title) not like '%bhoot%' and lower(title) not like '%sunday suspense%'
+        order by visit_count desc, last_visit_time desc limit 10;"
+  } | sed 's/&t=[0-9]*s//' >"$CFG/catalog.tsv"
+  rm -f "$tmp"
+  echo "Wrote $(grep -vc '^#' "$CFG/catalog.tsv") history picks to $CFG/catalog.tsv (used before the default catalog)."
+}
+
+music_ui() {
+  export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+  printf '\033]0;music\007'
+  local k state track
+  while true; do
+    state="$(music_osa 'player state as text')"
+    track="$(music_osa 'if player state is not stopped then name of current track')"
+    clear
+    echo "  ♪ terminal-tiler music"
+    echo
+    echo "  1) Bhoot FM      2) Sunday Suspense      3) Tech Podcast"
+    echo "  n) next   b) back   p) play/pause   s) shuffle   u) sync all   q) stop + quit"
+    echo
+    echo "  ${state:-stopped}: ${track:--}"
+    read -rsn1 -t 5 k || continue
+    case "$k" in
+      1|2|3) music_play "${SHOWS[$((k-1))]}" ;;
+      n) music_osa 'next track' ;;
+      b) music_osa 'previous track' ;;
+      p) music_osa 'playpause' ;;
+      s) music_osa 'set shuffle enabled to not shuffle enabled' ;;
+      u) for s in "${SHOWS[@]}"; do echo "Syncing $s..."; music_sync "$s"; done ;;
+      q) music_osa 'pause'; exit 0 ;;
+    esac
+  done
+}
+
+# ---------- coach ----------
+coach_install() {
+  swiftc -O "$REPO/coach/Coach.swift" -o "$COACH_BIN"
+  mkdir -p "$CFG"
+  [[ -f "$CFG/deadlines.json" ]] || /usr/bin/env python3 "$REPO/coach/refresh.py"
+  cat >"$COACH_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${COACH_LABEL}</string>
+  <key>ProgramArguments</key><array><string>${COACH_BIN}</string><string>${REPO}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>${CFG}/coach.err</string>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+</dict>
+</plist>
+EOF
+  launchctl bootout "gui/$(id -u)/${COACH_LABEL}" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$COACH_PLIST"
+  echo "Coach running. Allow tt-coach under Privacy & Security > Accessibility, and allow Chrome automation when asked."
+}
+
+coach_report() {
+  local day; day="$(date -u +%F)"; touch "$CFG/coach.log"
+  echo "Today: $(grep -c "^$day.*nudge" "$CFG/coach.log" 2>/dev/null) nudges, $(grep -c "^$day.*eyebreak" "$CFG/coach.log" 2>/dev/null) eye breaks," \
+       "$(grep -c "^$day.*scroll-warn" "$CFG/coach.log" 2>/dev/null) scroll warnings, $(grep -c "^$day.*tab-closed" "$CFG/coach.log" 2>/dev/null) tabs eaten."
+}
+
 
 install_agent() {
   cat >"$PLIST" <<EOF
@@ -231,9 +388,25 @@ case "${1:-}" in
     ;;
   status) cmd_status ;;
   snapshot) snapshot; echo ;;
+  music)
+    case "${2:-}" in
+      "") music_ui ;;
+      sync) if [[ -n "${3:-}" ]]; then music_sync "$3" "${4:-}"; else for s in "${SHOWS[@]}"; do echo "== $s"; music_sync "$s"; done; fi ;;
+      history) music_history ;;
+      *) echo "Usage: terminal-tiler music [sync|history]" >&2; exit 1 ;;
+    esac ;;
+  coach)
+    case "${2:-}" in
+      install) coach_install ;;
+      uninstall) launchctl bootout "gui/$(id -u)/${COACH_LABEL}" 2>/dev/null || true; rm -f "$COACH_PLIST"; echo "Coach removed" ;;
+      demo) "$COACH_BIN" "$REPO" --demo & sleep 12; kill $! ;;
+      refresh) /usr/bin/env python3 "$REPO/coach/refresh.py" ;;
+      report) coach_report ;;
+      *) echo "Usage: terminal-tiler coach install|uninstall|demo|refresh|report" >&2; exit 1 ;;
+    esac ;;
   ""|watch) watch_loop ;;
   -h|--help|help)
-    sed -n '2,14p' "$SCRIPT"
+    sed -n '2,18p' "$SCRIPT"
     ;;
   *)
     echo "Unknown command: $1" >&2
