@@ -1,8 +1,8 @@
-// tt-coach: Pac-Man productivity coach for terminal-tiler.
+// tt-coach: AI-orb productivity coach for terminal-tiler.
 // Build: swiftc -O Coach.swift -o tt-coach     Run: ./tt-coach <repo-dir>    Self-check: ./tt-coach --test
 //
 // Watches input with CGEventSource idle counters (no event tap), Chrome's active tab via AppleScript,
-// and pops a click-through Pac-Man overlay for: doom-scroll warnings (then closes the tab),
+// and pops a click-through glass card with an animated orb for: doom-scroll warnings (then closes the tab),
 // 20-20-20 eye breaks, low-activity nudges (quotes / personal advice / starters / deadlines), and greetings.
 import Cocoa
 
@@ -74,29 +74,47 @@ func starter(for context: String, _ p: Profile) -> String {
     return p.starters["default"]?.randomElement() ?? "Pick one task. Do the smallest first step now."
 }
 
-// MARK: Pac-Man overlay
+// MARK: AI orb overlay
 
-final class PacView: NSView {
-    var open: CGFloat = 0.3
-    var facingLeft = false
+/// Glowing orb: three colour blobs swirl inside a glass sphere (assistant-style, not a cartoon).
+final class OrbView: NSView {
+    var phase: CGFloat = 0
+    let blobs: [(NSColor, CGFloat, CGFloat)] = [   // colour, orbit speed, orbit radius (fraction)
+        (NSColor(srgbRed: 0.49, green: 0.23, blue: 0.93, alpha: 1), 1.0, 0.28),
+        (NSColor(srgbRed: 0.13, green: 0.83, blue: 0.93, alpha: 1), -1.4, 0.30),
+        (NSColor(srgbRed: 0.93, green: 0.28, blue: 0.60, alpha: 1), 0.7, 0.24)]
     override func draw(_ r: NSRect) {
-        let c = NSPoint(x: bounds.midX, y: bounds.midY), rad = bounds.width / 2 - 2
-        let mouth = 45 * open, base: CGFloat = facingLeft ? 180 : 0
-        let p = NSBezierPath()
-        p.move(to: c)
-        p.appendArc(withCenter: c, radius: rad, startAngle: base + mouth, endAngle: base - mouth + 360)
-        p.close()
-        NSColor(calibratedRed: 1, green: 0.85, blue: 0, alpha: 1).setFill(); p.fill()
-        NSColor.black.setStroke(); p.lineWidth = 2; p.stroke()
-        let eye = NSBezierPath(ovalIn: NSRect(x: c.x + (facingLeft ? -rad * 0.15 : rad * 0.05), y: c.y + rad * 0.45, width: rad * 0.18, height: rad * 0.18))
-        NSColor.black.setFill(); eye.fill()
+        let c = NSPoint(x: bounds.midX, y: bounds.midY), rad = bounds.width / 2 - 6
+        let pulse = 1 + 0.06 * sin(phase * 1.3)
+        // outer glow
+        NSGradient(colors: [NSColor(srgbRed: 0.45, green: 0.4, blue: 1, alpha: 0.45), .clear])!
+            .draw(fromCenter: c, radius: 0, toCenter: c, radius: rad * 1.25 * pulse, options: [])
+        let sphere = NSBezierPath(ovalIn: NSRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2))
+        NSGraphicsContext.saveGraphicsState(); sphere.addClip()
+        NSColor(srgbRed: 0.06, green: 0.05, blue: 0.16, alpha: 1).setFill(); sphere.fill()
+        for (i, (col, speed, orbit)) in blobs.enumerated() {
+            let a = phase * speed + CGFloat(i) * 2.1
+            let bc = NSPoint(x: c.x + cos(a) * rad * orbit * 2, y: c.y + sin(a) * rad * orbit * 2)
+            NSGradient(colors: [col.withAlphaComponent(0.95), col.withAlphaComponent(0)])!
+                .draw(fromCenter: bc, radius: 0, toCenter: bc, radius: rad * 1.05, options: [])
+        }
+        // specular highlight
+        let hc = NSPoint(x: c.x - rad * 0.35, y: c.y + rad * 0.4)
+        NSGradient(colors: [NSColor.white.withAlphaComponent(0.55), .clear])!
+            .draw(fromCenter: hc, radius: 0, toCenter: hc, radius: rad * 0.55, options: [])
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor.white.withAlphaComponent(0.25).setStroke(); sphere.lineWidth = 1; sphere.stroke()
     }
 }
 
 final class Overlay {
-    let win: NSWindow, pac = PacView(frame: NSRect(x: -120, y: 0, width: 96, height: 96))
-    let bubble = NSTextField(wrappingLabelWithString: "")
-    var queue: [(String, Double, Int?)] = [], busy = false, chomp: Timer?
+    let win: NSWindow
+    let card = NSVisualEffectView()
+    let orb = OrbView(frame: NSRect(x: 0, y: 0, width: 64, height: 64))
+    let title = NSTextField(labelWithString: "COACH")
+    let body = NSTextField(wrappingLabelWithString: "")
+    var queue: [(String, Double, Int?)] = [], busy = false, spin: Timer?
+    let cardW: CGFloat = 440, pad: CGFloat = 16, textX: CGFloat = 84
 
     init() {
         let f = NSScreen.main!.frame
@@ -105,13 +123,16 @@ final class Overlay {
         win.level = .screenSaver; win.ignoresMouseEvents = true
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         let v = NSView(frame: f); v.wantsLayer = true; win.contentView = v
-        pac.wantsLayer = true; v.addSubview(pac)
-        bubble.font = .systemFont(ofSize: 17, weight: .medium)
-        bubble.textColor = .white; bubble.drawsBackground = true
-        bubble.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 0.92)
-        bubble.wantsLayer = true; bubble.layer?.cornerRadius = 12; bubble.isHidden = true
-        bubble.preferredMaxLayoutWidth = 470
-        v.addSubview(bubble)
+        card.material = .hudWindow; card.blendingMode = .behindWindow; card.state = .active
+        card.appearance = NSAppearance(named: .vibrantDark)
+        card.wantsLayer = true; card.layer?.cornerRadius = 18; card.layer?.masksToBounds = true
+        card.layer?.borderWidth = 1; card.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        card.alphaValue = 0
+        title.font = .systemFont(ofSize: 11, weight: .semibold); title.textColor = NSColor(srgbRed: 0.65, green: 0.7, blue: 1, alpha: 1)
+        body.font = .systemFont(ofSize: 15, weight: .regular); body.textColor = NSColor.white.withAlphaComponent(0.92)
+        body.preferredMaxLayoutWidth = cardW - textX - pad
+        [orb, title, body].forEach(card.addSubview)
+        v.addSubview(card)
     }
 
     /// urgent messages jump the queue (scroll guard).
@@ -120,45 +141,51 @@ final class Overlay {
         if !busy { next() }
     }
 
-    private func move(to x: CGFloat, _ dur: Double, then: @escaping () -> Void) {
-        pac.facingLeft = x < pac.frame.minX
+    private func layout(_ text: String) {
+        body.stringValue = text
+        let tw = cardW - textX - pad
+        let bh = body.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: tw, height: 2000)).height
+        let h = max(96, bh + 52)
+        let f = NSScreen.main!.visibleFrame
+        card.setFrameSize(NSSize(width: cardW, height: h))
+        card.setFrameOrigin(NSPoint(x: card.frame.minX == 0 ? f.maxX - cardW - 20 : card.frame.minX, y: f.maxY - h - 16))
+        orb.setFrameOrigin(NSPoint(x: 12, y: h - 64 - 14))
+        title.frame = NSRect(x: textX, y: h - 30, width: tw, height: 16)
+        body.frame = NSRect(x: textX, y: 14, width: tw, height: bh)
+    }
+
+    private func slide(in show: Bool, then: @escaping () -> Void) {
+        let f = NSScreen.main!.visibleFrame, restX = f.maxX - cardW - 20
+        if show { card.setFrameOrigin(NSPoint(x: restX + 40, y: card.frame.minY)) }
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = dur; ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            pac.animator().setFrameOrigin(NSPoint(x: x, y: pac.frame.minY))
+            ctx.duration = show ? 0.45 : 0.35
+            ctx.timingFunction = CAMediaTimingFunction(name: show ? .easeOut : .easeIn)
+            card.animator().alphaValue = show ? 1 : 0
+            card.animator().setFrameOrigin(NSPoint(x: show ? restX : restX + 40, y: card.frame.minY))
         }, completionHandler: then)
     }
 
     private func next() {
-        guard !queue.isEmpty else { busy = false; win.orderOut(nil); chomp?.invalidate(); return }
+        guard !queue.isEmpty else { busy = false; win.orderOut(nil); spin?.invalidate(); return }
         busy = true
         let (text, secs, countdown) = queue.removeFirst()
-        let f = NSScreen.main!.visibleFrame
-        pac.setFrameOrigin(NSPoint(x: f.minX - 120, y: f.maxY - 220))
+        layout(countdown.map { "\(text)  \($0)s" } ?? text)
         win.orderFrontRegardless()
-        var t: CGFloat = 0
-        chomp?.invalidate()
-        chomp = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
-            t += 0.35; self?.pac.open = 0.15 + 0.85 * abs(sin(t)); self?.pac.needsDisplay = true
+        spin?.invalidate()
+        spin = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
+            self?.orb.phase += 0.05; self?.orb.needsDisplay = true
         }
-        move(to: f.midX - 260, 1.4) { [self] in
-            func show(_ s: String) {
-                bubble.stringValue = "  " + s + "  "
-                let w: CGFloat = 470, h = bubble.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: w, height: 2000)).height + 16
-                bubble.frame = NSRect(x: pac.frame.maxX + 14, y: pac.frame.maxY - h, width: w, height: h)
-            }
-            show(countdown.map { "\(text)  \($0)s" } ?? text)
-            bubble.isHidden = false
+        slide(in: true) { [self] in
             var left = countdown ?? 0
-            let total = countdown.map(Double.init) ?? secs
             if countdown != nil {
-                Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { tm in
-                    left -= 1; show(left > 0 ? "\(text)  \(left)s" : "Done. Back to work.")
+                Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] tm in
+                    left -= 1; layout(left > 0 ? "\(text)  \(left)s" : "Done. Back to work.")
                     if left <= 0 { tm.invalidate() }
                 }
             }
+            let total = countdown.map(Double.init) ?? secs
             DispatchQueue.main.asyncAfter(deadline: .now() + total + (countdown == nil ? 0 : 2)) { [self] in
-                bubble.isHidden = true
-                move(to: f.maxX + 120, 1.6) { self.next() }
+                slide(in: false) { self.next() }
             }
         }
     }
@@ -268,12 +295,12 @@ final class Coach {
         if scrolling { scrollTicks += 1; if warnedAt != nil { graceScroll += 1 } }  // ticks are 2 s apart
         if warnedAt == nil && now.timeIntervalSince(feedStart) >= 180 && scrollTicks >= 30 {
             warnedAt = now; graceScroll = 0
-            ui.say("Stop scrolling, \(profile.name). 3 minutes on this feed. Keep going and I eat this tab in 60s.", seconds: 10, urgent: true)
+            ui.say("Stop scrolling, \(profile.name). 3 minutes on this feed. Keep going and I close this tab in 60s.", seconds: 10, urgent: true)
             log("scroll-warn\t\(t.url)")
         } else if let w = warnedAt, now.timeIntervalSince(w) >= 60 {
             if graceScroll >= 3 {
                 osa("tell application \"Google Chrome\"\nrepeat with w in windows\nclose (every tab of w whose id is \(t.id))\nend repeat\nend tell")
-                ui.say("Chomp. Tab gone. " + starter(for: "", profile), seconds: 10, urgent: true)
+                ui.say("Tab closed. " + starter(for: "", profile), seconds: 10, urgent: true)
                 log("tab-closed\t\(t.url)")
             }
             feedTab = nil; warnedAt = nil
@@ -302,5 +329,5 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 try? FileManager.default.createDirectory(at: cfg, withIntermediateDirectories: true)
 let coach = Coach()
-if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), Pac-Man coach is on duty.", seconds: 6) }
+if CommandLine.arguments.contains("--demo") { coach.ui.say("Hi \(coach.profile.name), your coach is on duty. CVPR is close: one focused block now beats three later.", seconds: 6) }
 app.run()

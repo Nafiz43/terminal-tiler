@@ -97,9 +97,9 @@ terminal-tiler music history           # favourites from Chrome history -> ~/.co
 
 Edit `music/catalog.tsv` (show, count, YouTube search or URL, channel regex) to change the defaults.
 
-## Pac-Man coach
+## Coach
 
-`coach/Coach.swift` is a click-through overlay where Pac-Man glides in with a speech bubble:
+`coach/Coach.swift` is a click-through glass card with an animated AI orb that slides in at the top-right:
 
 - **Scroll guard:** 3 min of scrolling on a blocklisted Chrome site gets a warning; still scrolling 60 s later and the tab is closed (Cmd+Shift+T restores it).
 - **Eye breaks:** 20-20-20 every 20 min of active input.
