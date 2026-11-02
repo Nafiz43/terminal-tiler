@@ -10,7 +10,7 @@
 #   terminal-tiler music            # music player (auto-opens top-left with the first Terminal window)
 #   terminal-tiler music sync [SHOW [N]]  # download catalog audio into Music.app playlists
 #   terminal-tiler music history    # pick episodes from your Chrome history (needs Full Disk Access)
-#   terminal-tiler coach install|uninstall|demo|refresh|report   # Pac-Man productivity coach
+#   terminal-tiler coach install|uninstall|demo|refresh|report   # AI-orb productivity coach
 #
 # Requires: System Settings → Privacy & Security → Accessibility → allow Terminal
 #           (or allow `osascript` / this script's parent if run from launchd)
