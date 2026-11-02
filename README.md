@@ -103,7 +103,7 @@ Edit `music/catalog.tsv` (show, count, YouTube search or URL, channel regex) to 
 
 - **Scroll guard:** 3 min of scrolling on a blocklisted Chrome site gets a warning; still scrolling 60 s later and the tab is closed (Cmd+Shift+T restores it).
 - **Eye breaks:** 20-20-20 every 20 min of active input.
-- **Low-activity nudges:** after 5 min without typing, rotates AI news TLDRs (TLDR AI/Tech, OpenAI, Anthropic; summarised locally by Ollama, `RAFIN_MODEL`, default `qwen3:8b`), tech hard-work quotes, personal advice and a starter for the focused window.
+- **Every 10 min** while you are at the Mac (an eye break fills that slot when due), rotates AI news TLDRs (TLDR AI/Tech, OpenAI, Anthropic; summarised locally by Ollama, `RAFIN_MODEL`, default `qwen3:8b`), tech hard-work quotes, personal advice and a starter for the focused window.
 - **Deadlines:** the next aideadlines.org deadline appears once a day, in the first greeting.
 - **Greeting:** on login and after 30+ min away.
 

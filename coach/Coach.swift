@@ -3,7 +3,7 @@
 //
 // Watches input with CGEventSource idle counters (no event tap), Chrome's active tab via AppleScript,
 // and pops a click-through glass card with a breathing AI sparkle for: doom-scroll warnings (then closes the tab),
-// 20-20-20 eye breaks, low-activity nudges (AI news TLDRs / tech hard-work quotes / advice / starters), and greetings (deadline once a day).
+// 20-20-20 eye breaks, 10-minute nudges (AI news TLDRs / tech hard-work quotes / advice / starters), and greetings (deadline once a day).
 import Cocoa
 
 let home = FileManager.default.homeDirectoryForCurrentUser
@@ -241,7 +241,7 @@ final class Overlay {
 final class Coach {
     let ui = Overlay()
     var profile: Profile, quotes: [Quote], deadlines: [Deadline], news: [News], seenNews = Set<String>()
-    var activeSecs = 0, wasAway = true, lastNudge = Date.distantPast, nudgeTurn = 0, tick = 0
+    var activeSecs = 0, wasAway = true, lastNudge = Date(), nudgeTurn = 0, tick = 0
     // scroll guard
     var feedTab: String?, feedStart = Date(), feedLastSeen = Date.distantPast, scrollTicks = 0, warnedAt: Date?, graceScroll = 0
 
@@ -304,10 +304,11 @@ final class Coach {
         if activeSecs >= 1200 && !quiet {
             activeSecs = 0
             ui.say("Eye break: look 20 feet away.", countdown: 20); log("eyebreak")
+            lastNudge = now  // an eye break counts as this slot's popup
         }
 
-        // low activity: present (mouse/scroll in last minute) but no typing for 5 min
-        if idle(.keyDown) > 300 && any < 60 && now.timeIntervalSince(lastNudge) > 600 && !quiet {
+        // something every 10 min while you're at the Mac (any input in the last 2 min)
+        if any < 120 && now.timeIntervalSince(lastNudge) >= 600 && !quiet {
             lastNudge = now; nudgeTurn += 1
             ui.say(nudge(ctx), seconds: 13); log("nudge")
         }
