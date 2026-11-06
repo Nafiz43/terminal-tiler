@@ -23,7 +23,7 @@ SCRIPT="$(readlink -f "$0")"
 REPO="$(dirname "$SCRIPT")"
 CFG="$HOME/.config/terminal-tiler"
 MUSIC_DIR="$HOME/Music/TerminalTiler"
-SHOWS=("Bhoot FM" "Sunday Suspense" "Tech Podcast")
+SHOWS=("Bhoot FM" "Sunday Suspense" "Tech Podcast" "Rabindra Sangeet")
 COACH_LABEL="${LABEL}.coach"
 COACH_PLIST="$HOME/Library/LaunchAgents/${COACH_LABEL}.plist"
 COACH_BIN="$REPO/coach/tt-coach"
@@ -237,8 +237,27 @@ music_sync() {
   done
 }
 
+# Resume points: $CFG/resume/<show> = "<track persistent ID> <seconds>", $CFG/resume/last = last show.
+music_save() {
+  local r pl pid pos
+  r="$(music_osa 'if player state is not stopped then (name of current playlist) & tab & (persistent ID of current track) & tab & (player position as integer)')"
+  IFS=$'\t' read -r pl pid pos <<<"$r"
+  [[ "$pl" == "TT "* && -n "$pid" ]] || return 0
+  mkdir -p "$CFG/resume"
+  echo "$pid $pos" >"$CFG/resume/${pl#TT }"
+  echo "${pl#TT }" >"$CFG/resume/last"
+}
+
 music_play() {
-  local show="$1"
+  local show="$1" pid pos
+  music_save
+  if [[ -f "$CFG/resume/$show" ]] && read -r pid pos <"$CFG/resume/$show" &&
+    [[ "$pos" =~ ^[0-9]+$ ]] &&
+    music_osa "play (first track of user playlist \"TT $show\" whose persistent ID is \"$pid\")" &&
+    [[ "$(music_osa 'player state as text')" == playing ]]; then
+    music_osa "set player position to $(( pos > 5 ? pos - 5 : 0 ))"  # back up 5s for context
+    return
+  fi
   if ! compgen -G "$MUSIC_DIR/$show/*.m4a" >/dev/null; then
     echo "First run for $show: fetching one episode, the rest download in the background..."
     music_sync "$show" 1
@@ -271,24 +290,26 @@ music_ui() {
   printf '\033]0;music\007'
   local k state track
   while true; do
+    music_save
     state="$(music_osa 'player state as text')"
     track="$(music_osa 'if player state is not stopped then name of current track')"
     clear
     echo "  ♪ terminal-tiler music"
     echo
-    echo "  1) Bhoot FM      2) Sunday Suspense      3) Tech Podcast"
-    echo "  n) next   b) back   p) play/pause   s) shuffle   u) sync all   q) stop + quit"
+    echo "  1) Bhoot FM   2) Sunday Suspense   3) Tech Podcast   4) Rabindra Sangeet"
+    echo "  r) resume   n) next   b) back   p) play/pause   s) shuffle   u) sync all   q) stop + quit"
     echo
     echo "  ${state:-stopped}: ${track:--}"
     read -rsn1 -t 5 k || continue
     case "$k" in
-      1|2|3) music_play "${SHOWS[$((k-1))]}" ;;
+      [1-4]) music_play "${SHOWS[$((k-1))]}" ;;
       n) music_osa 'next track' ;;
       b) music_osa 'previous track' ;;
+      r) [[ -f "$CFG/resume/last" ]] && music_play "$(cat "$CFG/resume/last")" ;;
       p) music_osa 'playpause' ;;
       s) music_osa 'set shuffle enabled to not shuffle enabled' ;;
       u) for s in "${SHOWS[@]}"; do echo "Syncing $s..."; music_sync "$s"; done ;;
-      q) music_osa 'pause'; exit 0 ;;
+      q) music_save; music_osa 'pause'; exit 0 ;;
     esac
   done
 }

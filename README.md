@@ -86,7 +86,8 @@ Run these from the repo directory (or pass the full path to `terminal-tiler`):
 ## Music terminal
 
 The first Terminal window of a session opens a second window titled `music`, pinned to the top-left cell.
-Keys: `1` Bhoot FM, `2` Sunday Suspense, `3` Tech Podcast, `n`/`b` next/back, `p` play/pause, `s` shuffle, `u` sync, `q` quit.
+Keys: `1` Bhoot FM, `2` Sunday Suspense, `3` Tech Podcast, `4` Rabindra Sangeet, `n`/`b` next/back, `p` play/pause, `s` shuffle, `u` sync, `r` resume last show, `q` quit.
+Each show remembers its episode and position (`~/.config/terminal-tiler/resume/`), so `1` to `4` pick up where you left off, even after quitting.
 Audio is downloaded once with `yt-dlp` into `~/Music/TerminalTiler/` and played from Music.app playlists named `TT <show>`.
 
 ```bash
@@ -99,7 +100,7 @@ Edit `music/catalog.tsv` (show, count, YouTube search or URL, channel regex) to 
 
 ## Rafin (coach)
 
-`coach/Coach.swift` is a click-through glass card with a breathing star (lights up, dims) that slides in at the top-right:
+`coach/Coach.swift` is a glass card with a breathing star (lights up, dims) that slides in at the top-right. It is click-through except while hovered: hovering holds the card (it leaves 3 s after the mouse does), the pin keeps it until you unpin, and × dismisses it now. Clicks never steal focus.
 
 - **Scroll guard:** 3 min of scrolling on a blocklisted Chrome site gets a warning; still scrolling 60 s later and the tab is closed (Cmd+Shift+T restores it).
 - **Eye breaks:** 20-20-20 every 20 min of active input.

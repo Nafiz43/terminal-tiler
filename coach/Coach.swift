@@ -155,18 +155,23 @@ final class OrbView: NSImageView {
     }
 }
 
-final class Overlay {
-    let win: NSWindow
+final class Overlay: NSObject {
+    let win: NSPanel
     let card = NSVisualEffectView()
     let orb = OrbView(frame: NSRect(x: 0, y: 0, width: 64, height: 64))
     let title = NSTextField(labelWithString: "RAFIN")
     let body = NSTextField(wrappingLabelWithString: "")
     var queue: [(String, Double, Int?)] = [], busy = false
+    // gen invalidates the timers of a card once it is dismissed; hover or pin keeps it on screen.
+    private var gen = 0, until = Date(), pinned = false, leaving = false
+    private lazy var closeBtn = button("xmark", #selector(dismiss), "Dismiss")
+    private lazy var pinBtn = button("pin", #selector(togglePin), "Keep on screen")
     let cardW: CGFloat = 440, pad: CGFloat = 16, textX: CGFloat = 84
 
-    init() {
+    override init() {
         let f = NSScreen.main!.frame
-        win = NSWindow(contentRect: f, styleMask: .borderless, backing: .buffered, defer: false)
+        // non-activating: clicking the card never steals focus from the app you are in
+        win = NSPanel(contentRect: f, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         win.isOpaque = false; win.backgroundColor = .clear; win.hasShadow = false
         win.level = .screenSaver; win.ignoresMouseEvents = true
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -179,8 +184,27 @@ final class Overlay {
         title.font = .systemFont(ofSize: 11, weight: .semibold); title.textColor = NSColor(srgbRed: 0.65, green: 0.7, blue: 1, alpha: 1)
         body.font = .systemFont(ofSize: 15, weight: .regular); body.textColor = NSColor.white.withAlphaComponent(0.92)
         body.preferredMaxLayoutWidth = cardW - textX - pad
-        [orb, title, body].forEach(card.addSubview)
+        super.init()
+        [orb, title, body, pinBtn, closeBtn].forEach(card.addSubview)
         v.addSubview(card)
+    }
+
+    private func button(_ symbol: String, _ action: Selector, _ tip: String) -> NSButton {
+        let b = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tip)!, target: self, action: action)
+        b.isBordered = false; b.toolTip = tip; b.contentTintColor = NSColor.white.withAlphaComponent(0.55)
+        return b
+    }
+
+    @objc func dismiss() {
+        guard busy, !leaving else { return }
+        leaving = true; gen += 1; win.ignoresMouseEvents = true
+        slide(in: false) { self.next() }
+    }
+
+    @objc func togglePin() {
+        pinned.toggle()
+        pinBtn.image = NSImage(systemSymbolName: pinned ? "pin.fill" : "pin", accessibilityDescription: "Keep on screen")
+        pinBtn.contentTintColor = pinned ? title.textColor : NSColor.white.withAlphaComponent(0.55)
     }
 
     /// urgent messages jump the queue (scroll guard).
@@ -198,7 +222,9 @@ final class Overlay {
         card.setFrameSize(NSSize(width: cardW, height: h))
         card.setFrameOrigin(NSPoint(x: card.frame.minX == 0 ? f.maxX - cardW - 20 : card.frame.minX, y: f.maxY - h - 16))
         orb.setFrameOrigin(NSPoint(x: 12, y: h - 64 - 14))
-        title.frame = NSRect(x: textX, y: h - 30, width: tw, height: 16)
+        title.frame = NSRect(x: textX, y: h - 30, width: tw - 52, height: 16)
+        pinBtn.frame = NSRect(x: cardW - 54, y: h - 32, width: 20, height: 20)
+        closeBtn.frame = NSRect(x: cardW - 30, y: h - 32, width: 20, height: 20)
         body.frame = NSRect(x: textX, y: 14, width: tw, height: bh)
     }
 
@@ -215,7 +241,9 @@ final class Overlay {
 
     private func next() {
         guard !queue.isEmpty else { busy = false; win.orderOut(nil); orb.layer?.removeAllAnimations(); return }
-        busy = true
+        busy = true; leaving = false
+        if pinned { togglePin() }
+        gen += 1; let g = gen
         let (text, secs, countdown) = queue.removeFirst()
         layout(countdown.map { "\(text)  \($0)s" } ?? text)
         win.orderFrontRegardless()
@@ -224,13 +252,19 @@ final class Overlay {
             var left = countdown ?? 0
             if countdown != nil {
                 Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] tm in
+                    guard g == gen else { tm.invalidate(); return }
                     left -= 1; layout(left > 0 ? "\(text)  \(left)s" : "Done. Back to work.")
                     if left <= 0 { tm.invalidate() }
                 }
             }
-            let total = countdown.map(Double.init) ?? secs
-            DispatchQueue.main.asyncAfter(deadline: .now() + total + (countdown == nil ? 0 : 2)) { [self] in
-                slide(in: false) { self.next() }
+            until = Date() + (countdown.map(Double.init) ?? secs) + (countdown == nil ? 0 : 2)
+            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [self] tm in
+                guard g == gen else { tm.invalidate(); return }
+                // ponytail: polls the mouse 5x/s instead of a tracking area; the overlay only takes clicks while hovered
+                let over = win.convertToScreen(card.frame).contains(NSEvent.mouseLocation)
+                win.ignoresMouseEvents = !over
+                if over || pinned { until = max(until, Date() + 3) }  // stays 3s after the mouse leaves
+                if Date() >= until { dismiss() }
             }
         }
     }
