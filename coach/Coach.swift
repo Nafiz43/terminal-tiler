@@ -360,7 +360,7 @@ final class Coach {
         return d
     }
 
-    // Rotation: news, quote, news, advice/starter.
+    // Rotation: news, advice, news, advice (quotes fill in when news runs out).
     func nudge(_ ctx: String) -> String {
         switch nudgeTurn % 4 {
         case 0, 2:
@@ -370,8 +370,8 @@ final class Coach {
                 return n.summary.isEmpty ? "\(n.src): \(n.title)" : "\(n.src): \(n.title). \(n.summary)"
             }
             if let q = quotes.randomElement() { return "\u{201C}\(q.q)\u{201D} - \(q.a)" }
-        case 1: if let q = quotes.randomElement() { return "\u{201C}\(q.q)\u{201D} - \(q.a)" }
-        default: if nudgeTurn % 8 == 3, let a = profile.advice.randomElement() { return a }
+        case 1: if let a = profile.advice.randomElement() { return a }
+        default: if let a = profile.advice.randomElement() { return a }
         }
         return "Quick start: " + starter(for: ctx, profile)
     }
