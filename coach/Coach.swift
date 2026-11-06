@@ -344,7 +344,7 @@ final class Coach {
         // something every 10 min while you're at the Mac (any input in the last 2 min)
         if any < 120 && now.timeIntervalSince(lastNudge) >= 600 && !quiet {
             lastNudge = now; nudgeTurn += 1
-            ui.say(nudge(ctx), seconds: 13); log("nudge")
+            let m = nudge(ctx); ui.say(m, seconds: 13); log("nudge\t" + m.replacingOccurrences(of: "\n", with: " "))
         }
 
         // doom-scroll guard (Chrome only), polled every 2 s
